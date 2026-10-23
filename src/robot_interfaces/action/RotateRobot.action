@@ -1,0 +1,7 @@
+float32 angle_degrees
+float32 angular_speed
+---
+bool success
+string message
+---
+float32 progress

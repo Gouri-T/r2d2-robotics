@@ -1,80 +1,99 @@
-# r2d2 — ROS 2 Humble + Gazebo Harmonic
+# R2D2 Robotics 🤖
 
-## Prerequisites
-Humble's default `ros-humble-ros-gz` targets Gazebo Fortress. For Harmonic install the OSRF-built packages:
+**A ROS 2 and Gazebo-based mobile robotics simulation featuring robot description, LiDAR sensing, obstacle detection services, custom actions, teleoperation, and a foundation for SLAM and autonomous navigation.**
 
-    sudo curl https://packages.osrfoundation.org/gazebo.gpg --output /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
-    sudo apt update
-    sudo apt install ros-humble-ros-gzharmonic
+![ROS 2](https://img.shields.io/badge/ROS_2-Humble-22314E?logo=ros)
+![Gazebo](https://img.shields.io/badge/Gazebo-Harmonic-orange)
+![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu)
+![Language](https://img.shields.io/badge/Language-Python%20%7C%20XML-blue)
 
-(Don't run `rosdep install` for this package; it would pull the Fortress `ros_gz` build.)
+## Contents
+- [Setup](#setup)
+- [Launch Simulation](#launch-simulation)
+- [Keyboard Teleoperation](#keyboard-teleoperation)
+- [Obstacle Detection Service](#obstacle-detection-service)
+- [Robot Rotation Action](#robot-rotation-action)
+- [RViz](#rviz)
+- [Save a Map](#save-a-map)
 
-## Build & run
-    mkdir -p ~/ws/src && cp -r r2d2 ~/ws/src/
-    cd ~/ws && source /opt/ros/humble/setup.bash
-    colcon build --packages-select r2d2
-    source install/setup.bash
-    ros2 launch r2d2 spawn.launch.py
+## Setup
 
-Launch args: `rviz:=true world:=<path to .sdf> x:=0.0 y:=0.0 z:=0.52`
+**Requirements:** Ubuntu, ROS 2 Humble, Gazebo Harmonic.
 
-The default world (`worlds/r2d2_world.sdf`) loads Gazebo's Sensors system (needed by the
-camera and lidar) and has a few 2 m-tall obstacles for the lidar to hit. If you pass your own
-world, it must include `gz-sim-sensors-system`. If ogre2 rendering fails (VM / no GPU), change
-`<render_engine>` in the world file to `ogre`.
+```bash
+cd ~/r2d2-robotics
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
 
-## Sensors (all bridged to ROS 2)
-| Topic | Type | Frame |
-|---|---|---|
-| `/scan` | sensor_msgs/LaserScan (360°, 720 samples, 0.12-15 m, 10 Hz) | `lidar_link` (on a mast above the head) |
-| `/camera/image_raw` | sensor_msgs/Image (640x480, 30 Hz) | `camera_link` (on the head "eye" box, turns with `head_swivel`) |
-| `/camera/camera_info` | sensor_msgs/CameraInfo | `camera_link` |
-| `/odom`, `/tf` | Odometry, `odom` -> `base_link` | |
+Run `source install/setup.bash` in every new terminal before using the project.
 
-The robot's front is +y of `base_link` (the gripper side); both sensors face that way.
+## Launch Simulation
 
-RViz opens with RobotModel, TF, LaserScan and Camera displays; fixed frame is `odom`.
+```bash
+ros2 launch r2d2 spawn.launch.py
+```
 
-## Teleop
-In a second terminal (workspace sourced):
+Launches the robot simulation and associated ROS 2 nodes.
 
-    ros2 run r2d2 teleop_keyboard.py
+## Keyboard Teleoperation
 
-| Key | Action |
-|---|---|
-| w / s | forward / backward (latched) |
-| a / d | rotate left / right |
-| q / e | forward-left / forward-right arc |
-| SPACE | stop |
-| z / c | speeds -10% / +10% (start: 0.5 m/s, 1.0 rad/s) |
-| j / l | head swivel left / right |
-| i / k | gripper pole extend / retract |
-| u / o | finger angle + / - (0 .. 0.548 rad) |
-| r | reset head and gripper to 0 |
+```bash
+python3 ~/r2d2-robotics/src/r2d2/scripts/teleop_keyboard.py
+```
 
-Or `ros2 launch r2d2 spawn.launch.py teleop:=true` to open it in an xterm window.
-Any other tool that publishes `geometry_msgs/Twist` on `/cmd_vel` also works, e.g.
-`ros2 run teleop_twist_keyboard teleop_twist_keyboard` or `teleop_twist_joy`.
+Use the keyboard controls defined in the teleoperation script to move the robot.
 
-Driving uses Gazebo's DiffDrive plugin on the four wheels (track 0.44 m, wheel radius 0.035 m).
-The wheel joint axes in the URDF were flipped (`0 0 -1`) so positive `linear.x` drives toward the
-robot's front (+y). It is a skid-steer layout, so in-place turns scrub the wheels; if turning is
-sluggish, raise the angular speed with `c`, or lower wheel friction.
+## Obstacle Detection Service
 
-## Control the joints
-    ros2 topic pub --once /head_swivel/cmd       std_msgs/msg/Float64 "{data: 1.0}"
-    ros2 topic pub --once /gripper_extension/cmd std_msgs/msg/Float64 "{data: -0.2}"   # -0.38 .. 0 m
-    ros2 topic pub --once /left_gripper/cmd      std_msgs/msg/Float64 "{data: 0.4}"    # 0 .. 0.548 rad
-    ros2 topic pub --once /right_gripper/cmd     std_msgs/msg/Float64 "{data: 0.4}"
-    ros2 topic echo /joint_states
+**Terminal 1 — Start the service**
+```bash
+ros2 run robot_services obstacle_service
+```
 
-## Drive with the keyboard
-    sudo apt install ros-humble-teleop-twist-keyboard
-    ros2 run teleop_twist_keyboard teleop_twist_keyboard
+**Terminal 2 — Request obstacle detection**
+```bash
+ros2 service call /check_obstacle std_srvs/srv/Trigger "{}"
+```
 
-`/cmd_vel` is bridged to a Gazebo skid-steer DiffDrive plugin on the four wheels. "Forward"
-(`i`) is the robot's +y (gripper/camera side). Accelerations are limited (1 m/s², 2 rad/s²)
-because the robot is tall with a short wheelbase and tips over under hard acceleration.
-Keep teleop speeds modest (press `z` a few times to lower them); the default 0.5 m/s is fine.
-In-place turning is a skid-steer scrub, so wheel friction is set to 0.4.
+Returns whether an obstacle was detected in the configured LiDAR scan region.
+
+## Robot Rotation Action
+
+**Terminal 1 — Start the action server**
+```bash
+ros2 run robot_actions rotate_server
+```
+
+**Terminal 2 — Rotate the robot**
+
+Example: rotate 90° at an angular speed of 0.5 rad/s.
+
+```bash
+ros2 action send_goal /rotate_robot robot_interfaces/action/RotateRobot "{angle_degrees: 90.0, angular_speed: 0.5}"
+```
+
+Change `angle_degrees` and `angular_speed` to adjust the rotation.
+
+## RViz
+
+Open RViz separately if it is not already launched:
+
+```bash
+rviz2
+```
+
+## Save a Map
+
+With the mapping node running and the environment mapped:
+
+```bash
+ros2 run nav2_map_server map_saver_cli -f ~/r2d2-robotics/map
+```
+
+This saves the map as `map.yaml` and `map.pgm` in the workspace root.
+
+---
+**Workspace:** `~/r2d2-robotics`  
+**Packages:** `r2d2`, `robot_services`, `robot_actions`, `robot_interfaces`
